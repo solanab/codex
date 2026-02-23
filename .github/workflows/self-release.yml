@@ -39,6 +39,7 @@ jobs:
             build-essential \
             clang \
             cmake \
+            libcap-dev \
             libclang-dev \
             libssl-dev \
             libwayland-dev \
