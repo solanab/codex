@@ -50,8 +50,10 @@ use async_channel::Receiver;
 use async_channel::Sender;
 use codex_hooks::HookEvent;
 use codex_hooks::HookEventAfterAgent;
+use codex_hooks::HookEventUserInputRequested;
 use codex_hooks::HookPayload;
 use codex_hooks::HookResult;
+use codex_hooks::HookUserInputQuestion;
 use codex_hooks::Hooks;
 use codex_hooks::HooksConfig;
 use codex_network_proxy::NetworkProxy;
@@ -125,6 +127,7 @@ use crate::config::Config;
 use crate::config::Constrained;
 use crate::config::ConstraintResult;
 use crate::config::GhostSnapshotConfig;
+use crate::config::NotifyEvent;
 use crate::config::StartedNetworkProxy;
 use crate::config::resolve_web_search_mode_for_turn;
 use crate::config::types::McpServerConfig;
@@ -1315,6 +1318,19 @@ impl Session {
             ),
             hooks: Hooks::new(HooksConfig {
                 legacy_notify_argv: config.notify.clone(),
+                legacy_notify_events: config
+                    .notify_events
+                    .iter()
+                    .copied()
+                    .map(|event| match event {
+                        NotifyEvent::AgentTurnComplete => {
+                            codex_hooks::LegacyNotifyEvent::AgentTurnComplete
+                        }
+                        NotifyEvent::UserInputRequested => {
+                            codex_hooks::LegacyNotifyEvent::UserInputRequested
+                        }
+                    })
+                    .collect(),
             }),
             rollout: Mutex::new(rollout_recorder),
             user_shell: Arc::new(default_shell),
@@ -2486,6 +2502,46 @@ impl Session {
         };
         if prev_entry.is_some() {
             warn!("Overwriting existing pending user input for sub_id: {event_id}");
+        }
+
+        let hook_outcomes = self
+            .hooks()
+            .dispatch(HookPayload {
+                session_id: self.conversation_id,
+                cwd: turn_context.cwd.clone(),
+                triggered_at: chrono::Utc::now(),
+                hook_event: HookEvent::UserInputRequested {
+                    event: HookEventUserInputRequested {
+                        thread_id: self.conversation_id,
+                        turn_id: turn_context.sub_id.clone(),
+                        call_id: call_id.clone(),
+                        questions: args
+                            .questions
+                            .iter()
+                            .map(|question| HookUserInputQuestion {
+                                id: question.id.clone(),
+                                header: question.header.clone(),
+                                question: question.question.clone(),
+                                is_secret: question.is_secret,
+                            })
+                            .collect(),
+                    },
+                },
+            })
+            .await;
+        for hook_outcome in hook_outcomes {
+            let hook_name = hook_outcome.hook_name;
+            match hook_outcome.result {
+                HookResult::Success => {}
+                HookResult::FailedContinue(error) | HookResult::FailedAbort(error) => {
+                    warn!(
+                        turn_id = %turn_context.sub_id,
+                        hook_name = %hook_name,
+                        error = %error,
+                        "user_input_requested hook failed; continuing"
+                    );
+                }
+            }
         }
 
         let event = EventMsg::RequestUserInput(RequestUserInputEvent {
@@ -7902,6 +7958,19 @@ mod tests {
             ),
             hooks: Hooks::new(HooksConfig {
                 legacy_notify_argv: config.notify.clone(),
+                legacy_notify_events: config
+                    .notify_events
+                    .iter()
+                    .copied()
+                    .map(|event| match event {
+                        NotifyEvent::AgentTurnComplete => {
+                            codex_hooks::LegacyNotifyEvent::AgentTurnComplete
+                        }
+                        NotifyEvent::UserInputRequested => {
+                            codex_hooks::LegacyNotifyEvent::UserInputRequested
+                        }
+                    })
+                    .collect(),
             }),
             rollout: Mutex::new(None),
             user_shell: Arc::new(default_user_shell()),
@@ -8055,6 +8124,19 @@ mod tests {
             ),
             hooks: Hooks::new(HooksConfig {
                 legacy_notify_argv: config.notify.clone(),
+                legacy_notify_events: config
+                    .notify_events
+                    .iter()
+                    .copied()
+                    .map(|event| match event {
+                        NotifyEvent::AgentTurnComplete => {
+                            codex_hooks::LegacyNotifyEvent::AgentTurnComplete
+                        }
+                        NotifyEvent::UserInputRequested => {
+                            codex_hooks::LegacyNotifyEvent::UserInputRequested
+                        }
+                    })
+                    .collect(),
             }),
             rollout: Mutex::new(None),
             user_shell: Arc::new(default_user_shell()),

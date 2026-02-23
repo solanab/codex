@@ -5,15 +5,32 @@ use crate::types::HookEvent;
 use crate::types::HookPayload;
 use crate::types::HookResponse;
 
-#[derive(Default, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LegacyNotifyEvent {
+    AgentTurnComplete,
+    UserInputRequested,
+}
+
+#[derive(Clone)]
 pub struct HooksConfig {
     pub legacy_notify_argv: Option<Vec<String>>,
+    pub legacy_notify_events: Vec<LegacyNotifyEvent>,
+}
+
+impl Default for HooksConfig {
+    fn default() -> Self {
+        Self {
+            legacy_notify_argv: None,
+            legacy_notify_events: vec![LegacyNotifyEvent::AgentTurnComplete],
+        }
+    }
 }
 
 #[derive(Clone)]
 pub struct Hooks {
     after_agent: Vec<Hook>,
     after_tool_use: Vec<Hook>,
+    user_input_requested: Vec<Hook>,
 }
 
 impl Default for Hooks {
@@ -26,15 +43,31 @@ impl Default for Hooks {
 // executed after specific events in the Codex lifecycle.
 impl Hooks {
     pub fn new(config: HooksConfig) -> Self {
-        let after_agent = config
+        let legacy_notify_hook = config
             .legacy_notify_argv
             .filter(|argv| !argv.is_empty() && !argv[0].is_empty())
-            .map(crate::notify_hook)
+            .map(crate::notify_hook);
+
+        let after_agent = config
+            .legacy_notify_events
+            .contains(&LegacyNotifyEvent::AgentTurnComplete)
+            .then(|| legacy_notify_hook.clone())
+            .flatten()
             .into_iter()
             .collect();
+
+        let user_input_requested = config
+            .legacy_notify_events
+            .contains(&LegacyNotifyEvent::UserInputRequested)
+            .then(|| legacy_notify_hook)
+            .flatten()
+            .into_iter()
+            .collect();
+
         Self {
             after_agent,
             after_tool_use: Vec::new(),
+            user_input_requested,
         }
     }
 
@@ -42,6 +75,7 @@ impl Hooks {
         match hook_event {
             HookEvent::AfterAgent { .. } => &self.after_agent,
             HookEvent::AfterToolUse { .. } => &self.after_tool_use,
+            HookEvent::UserInputRequested { .. } => &self.user_input_requested,
         }
     }
 
@@ -93,9 +127,11 @@ mod tests {
     use super::*;
     use crate::types::HookEventAfterAgent;
     use crate::types::HookEventAfterToolUse;
+    use crate::types::HookEventUserInputRequested;
     use crate::types::HookResult;
     use crate::types::HookToolInput;
     use crate::types::HookToolKind;
+    use crate::types::HookUserInputQuestion;
 
     const CWD: &str = "/tmp";
     const INPUT_MESSAGE: &str = "hello";
@@ -197,6 +233,30 @@ mod tests {
         }
     }
 
+    fn user_input_requested_payload(label: &str) -> HookPayload {
+        HookPayload {
+            session_id: ThreadId::new(),
+            cwd: PathBuf::from(CWD),
+            triggered_at: Utc
+                .with_ymd_and_hms(2025, 1, 1, 0, 0, 0)
+                .single()
+                .expect("valid timestamp"),
+            hook_event: HookEvent::UserInputRequested {
+                event: HookEventUserInputRequested {
+                    thread_id: ThreadId::new(),
+                    turn_id: format!("turn-{label}"),
+                    call_id: format!("call-{label}"),
+                    questions: vec![HookUserInputQuestion {
+                        id: "q1".to_string(),
+                        header: "Confirm".to_string(),
+                        question: "Proceed?".to_string(),
+                        is_secret: false,
+                    }],
+                },
+            },
+        }
+    }
+
     #[test]
     fn command_from_argv_returns_none_for_empty_args() {
         assert!(command_from_argv(&[]).is_none());
@@ -229,6 +289,7 @@ mod tests {
         assert!(
             Hooks::new(HooksConfig {
                 legacy_notify_argv: Some(vec![]),
+                ..HooksConfig::default()
             })
             .after_agent
             .is_empty()
@@ -236,6 +297,7 @@ mod tests {
         assert!(
             Hooks::new(HooksConfig {
                 legacy_notify_argv: Some(vec!["".to_string()]),
+                ..HooksConfig::default()
             })
             .after_agent
             .is_empty()
@@ -243,6 +305,7 @@ mod tests {
         assert_eq!(
             Hooks::new(HooksConfig {
                 legacy_notify_argv: Some(vec!["notify-send".to_string()]),
+                ..HooksConfig::default()
             })
             .after_agent
             .len(),
@@ -320,6 +383,21 @@ mod tests {
         };
 
         let outcomes = hooks.dispatch(after_tool_use_payload("p")).await;
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(outcomes[0].hook_name, "counting");
+        assert!(matches!(outcomes[0].result, HookResult::Success));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn dispatch_executes_user_input_requested_hooks() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let hooks = Hooks {
+            user_input_requested: vec![counting_success_hook(&calls, "counting")],
+            ..Hooks::default()
+        };
+
+        let outcomes = hooks.dispatch(user_input_requested_payload("q")).await;
         assert_eq!(outcomes.len(), 1);
         assert_eq!(outcomes[0].hook_name, "counting");
         assert!(matches!(outcomes[0].result, HookResult::Success));

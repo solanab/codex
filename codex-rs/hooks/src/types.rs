@@ -135,6 +135,24 @@ pub struct HookEventAfterToolUse {
     pub output_preview: String,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct HookUserInputQuestion {
+    pub id: String,
+    pub header: String,
+    pub question: String,
+    pub is_secret: bool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct HookEventUserInputRequested {
+    pub thread_id: ThreadId,
+    pub turn_id: String,
+    pub call_id: String,
+    pub questions: Vec<HookUserInputQuestion>,
+}
+
 fn serialize_triggered_at<S>(value: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
@@ -153,6 +171,10 @@ pub enum HookEvent {
         #[serde(flatten)]
         event: HookEventAfterToolUse,
     },
+    UserInputRequested {
+        #[serde(flatten)]
+        event: HookEventUserInputRequested,
+    },
 }
 
 #[cfg(test)]
@@ -169,10 +191,12 @@ mod tests {
     use super::HookEvent;
     use super::HookEventAfterAgent;
     use super::HookEventAfterToolUse;
+    use super::HookEventUserInputRequested;
     use super::HookPayload;
     use super::HookToolInput;
     use super::HookToolInputLocalShell;
     use super::HookToolKind;
+    use super::HookUserInputQuestion;
 
     #[test]
     fn hook_payload_serializes_stable_wire_shape() {
@@ -206,6 +230,54 @@ mod tests {
                 "turn_id": "turn-1",
                 "input_messages": ["hello"],
                 "last_assistant_message": "hi",
+            },
+        });
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn user_input_requested_payload_serializes_stable_wire_shape() {
+        let session_id = ThreadId::new();
+        let thread_id = ThreadId::new();
+        let payload = HookPayload {
+            session_id,
+            cwd: PathBuf::from("tmp"),
+            triggered_at: Utc
+                .with_ymd_and_hms(2025, 1, 1, 0, 0, 0)
+                .single()
+                .expect("valid timestamp"),
+            hook_event: HookEvent::UserInputRequested {
+                event: HookEventUserInputRequested {
+                    thread_id,
+                    turn_id: "turn-3".to_string(),
+                    call_id: "call-2".to_string(),
+                    questions: vec![HookUserInputQuestion {
+                        id: "confirm_path".to_string(),
+                        header: "Confirm".to_string(),
+                        question: "Proceed with the plan?".to_string(),
+                        is_secret: false,
+                    }],
+                },
+            },
+        };
+
+        let actual = serde_json::to_value(payload).expect("serialize hook payload");
+        let expected = json!({
+            "session_id": session_id.to_string(),
+            "cwd": "tmp",
+            "triggered_at": "2025-01-01T00:00:00Z",
+            "hook_event": {
+                "event_type": "user_input_requested",
+                "thread_id": thread_id.to_string(),
+                "turn_id": "turn-3",
+                "call_id": "call-2",
+                "questions": [{
+                    "id": "confirm_path",
+                    "header": "Confirm",
+                    "question": "Proceed with the plan?",
+                    "is_secret": false,
+                }],
             },
         });
 

@@ -835,6 +835,13 @@
         }
       ]
     },
+    "NotifyEvent": {
+      "enum": [
+        "agent-turn-complete",
+        "user-input-requested"
+      ],
+      "type": "string"
+    },
     "OAuthCredentialsStoreMode": {
       "description": "Determine where Codex should store and read MCP credentials.",
       "oneOf": [
@@ -1889,6 +1896,14 @@
       "description": "Optional external command to spawn for end-user notifications.",
       "items": {
         "type": "string"
+      },
+      "type": "array"
+    },
+    "notify_events": {
+      "default": null,
+      "description": "Optional list of events that trigger the notify hook.\n\nWhen unset, defaults to `agent-turn-complete`.",
+      "items": {
+        "$ref": "#/definitions/NotifyEvent"
       },
       "type": "array"
     },

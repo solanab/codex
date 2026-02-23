@@ -156,6 +156,17 @@ pub struct Permissions {
     pub macos_seatbelt_profile_extensions: Option<MacOsSeatbeltProfileExtensions>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum NotifyEvent {
+    AgentTurnComplete,
+    UserInputRequested,
+}
+
+fn default_notify_events() -> Vec<NotifyEvent> {
+    vec![NotifyEvent::AgentTurnComplete]
+}
+
 /// Application configuration loaded from disk and merged with overrides.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
@@ -228,11 +239,10 @@ pub struct Config {
     pub commit_attribution: Option<String>,
 
     /// Optional external notifier command. When set, Codex will spawn this
-    /// program after each completed *turn* (i.e. when the agent finishes
-    /// processing a user submission). The value must be the full command
-    /// broken into argv tokens **without** the trailing JSON argument - Codex
-    /// appends one extra argument containing a JSON payload describing the
-    /// event.
+    /// program when the agent needs your attention. The value must be the full
+    /// command broken into argv tokens **without** the trailing JSON argument -
+    /// Codex appends one extra argument containing a JSON payload describing the
+    /// event. See [`notify_events`] to control which events trigger the hook.
     ///
     /// Example `~/.codex/config.toml` snippet:
     ///
@@ -248,6 +258,9 @@ pub struct Config {
     ///
     /// If unset the feature is disabled.
     pub notify: Option<Vec<String>>,
+
+    /// Events that trigger the [`notify`] hook.
+    pub notify_events: Vec<NotifyEvent>,
 
     /// TUI notifications preference. When set, the TUI will send terminal notifications on
     /// approvals and turn completions when not focused.
@@ -1000,6 +1013,12 @@ pub struct ConfigToml {
     /// Optional external command to spawn for end-user notifications.
     #[serde(default)]
     pub notify: Option<Vec<String>>,
+
+    /// Optional list of events that trigger the notify hook.
+    ///
+    /// When unset, defaults to `agent-turn-complete`.
+    #[serde(default)]
+    pub notify_events: Option<Vec<NotifyEvent>>,
 
     /// System instructions.
     pub instructions: Option<String>,
@@ -2008,6 +2027,7 @@ impl Config {
             enforce_residency: enforce_residency.value,
             did_user_set_custom_approval_policy_or_sandbox_mode,
             notify: cfg.notify,
+            notify_events: cfg.notify_events.unwrap_or_else(default_notify_events),
             user_instructions,
             base_instructions,
             personality,
@@ -4611,6 +4631,7 @@ model_verbosity = "high"
                 did_user_set_custom_approval_policy_or_sandbox_mode: true,
                 user_instructions: None,
                 notify: None,
+                notify_events: default_notify_events(),
                 cwd: fixture.cwd(),
                 cli_auth_credentials_store_mode: Default::default(),
                 mcp_servers: Constrained::allow_any(HashMap::new()),
@@ -4734,6 +4755,7 @@ model_verbosity = "high"
             did_user_set_custom_approval_policy_or_sandbox_mode: true,
             user_instructions: None,
             notify: None,
+            notify_events: default_notify_events(),
             cwd: fixture.cwd(),
             cli_auth_credentials_store_mode: Default::default(),
             mcp_servers: Constrained::allow_any(HashMap::new()),
@@ -4855,6 +4877,7 @@ model_verbosity = "high"
             did_user_set_custom_approval_policy_or_sandbox_mode: true,
             user_instructions: None,
             notify: None,
+            notify_events: default_notify_events(),
             cwd: fixture.cwd(),
             cli_auth_credentials_store_mode: Default::default(),
             mcp_servers: Constrained::allow_any(HashMap::new()),
@@ -4962,6 +4985,7 @@ model_verbosity = "high"
             did_user_set_custom_approval_policy_or_sandbox_mode: true,
             user_instructions: None,
             notify: None,
+            notify_events: default_notify_events(),
             cwd: fixture.cwd(),
             cli_auth_credentials_store_mode: Default::default(),
             mcp_servers: Constrained::allow_any(HashMap::new()),
