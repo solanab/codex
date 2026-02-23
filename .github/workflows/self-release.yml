@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: self-release
+  cancel-in-progress: true
+
 jobs:
   build:
     name: build (${{ matrix.target }})
