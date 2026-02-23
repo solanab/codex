@@ -55,6 +55,7 @@ jobs:
             --manifest-path codex-rs/Cargo.toml \
             -p codex-cli \
             --bin codex \
+            --jobs 1 \
             --release \
             --target "${{ matrix.target }}"
 
