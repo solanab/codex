@@ -20,7 +20,7 @@ and are labeled as connected; others are marked as can be installed.
 
 ## Notify
 
-Codex can run a notification hook when the agent finishes a turn. See the configuration reference for the latest notification settings:
+Codex can run a notification hook when the agent finishes a turn. Configure `notify` and optionally `notify_events` (for example, add `user-input-requested` to get notified when Codex requests user input in Plan mode). See the configuration reference for the latest notification settings:
 
 - https://developers.openai.com/codex/config-reference
 

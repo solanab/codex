@@ -8,7 +8,16 @@ use crate::Hook;
 use crate::HookEvent;
 use crate::HookPayload;
 use crate::HookResult;
+use crate::HookUserInputQuestion;
 use crate::command_from_argv;
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+struct UserInputQuestionSummary {
+    header: String,
+    question: String,
+    is_secret: bool,
+}
 
 /// Legacy notify payload appended as the final argv argument for backward compatibility.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -26,6 +35,15 @@ enum UserNotification {
         /// The last message sent by the assistant in the turn.
         last_assistant_message: Option<String>,
     },
+    #[serde(rename_all = "kebab-case")]
+    UserInputRequested {
+        thread_id: String,
+        turn_id: String,
+        call_id: String,
+        cwd: String,
+        question_count: usize,
+        questions: Vec<UserInputQuestionSummary>,
+    },
 }
 
 pub fn legacy_notify_json(hook_event: &HookEvent, cwd: &Path) -> Result<String, serde_json::Error> {
@@ -39,10 +57,33 @@ pub fn legacy_notify_json(hook_event: &HookEvent, cwd: &Path) -> Result<String, 
                 last_assistant_message: event.last_assistant_message.clone(),
             })
         }
+        HookEvent::UserInputRequested { event } => {
+            serde_json::to_string(&UserNotification::UserInputRequested {
+                thread_id: event.thread_id.to_string(),
+                turn_id: event.turn_id.clone(),
+                call_id: event.call_id.clone(),
+                cwd: cwd.display().to_string(),
+                question_count: event.questions.len(),
+                questions: user_input_questions_summary(&event.questions),
+            })
+        }
         _ => Err(serde_json::Error::io(std::io::Error::other(
-            "legacy notify payload is only supported for after_agent",
+            "legacy notify payload is only supported for after_agent and user_input_requested",
         ))),
     }
+}
+
+fn user_input_questions_summary(
+    questions: &[HookUserInputQuestion],
+) -> Vec<UserInputQuestionSummary> {
+    questions
+        .iter()
+        .map(|question| UserInputQuestionSummary {
+            header: question.header.clone(),
+            question: question.question.clone(),
+            is_secret: question.is_secret,
+        })
+        .collect()
 }
 
 pub fn notify_hook(argv: Vec<String>) -> Hook {
@@ -96,6 +137,22 @@ mod tests {
         })
     }
 
+    fn expected_user_input_requested_notification_json() -> Value {
+        json!({
+            "type": "user-input-requested",
+            "thread-id": "b5f6c1c2-1111-2222-3333-444455556666",
+            "turn-id": "12345",
+            "call-id": "call-1",
+            "cwd": "/Users/example/project",
+            "question-count": 1,
+            "questions": [{
+                "header": "Confirm",
+                "question": "Proceed with the plan?",
+                "is-secret": false,
+            }],
+        })
+    }
+
     #[test]
     fn test_user_notification() -> Result<()> {
         let notification = UserNotification::AgentTurnComplete {
@@ -130,6 +187,30 @@ mod tests {
         let serialized = legacy_notify_json(&hook_event, Path::new("/Users/example/project"))?;
         let actual: Value = serde_json::from_str(&serialized)?;
         assert_eq!(actual, expected_notification_json());
+
+        Ok(())
+    }
+
+    #[test]
+    fn legacy_notify_json_serializes_user_input_requested_event() -> Result<()> {
+        let hook_event = HookEvent::UserInputRequested {
+            event: crate::HookEventUserInputRequested {
+                thread_id: ThreadId::from_string("b5f6c1c2-1111-2222-3333-444455556666")
+                    .expect("valid thread id"),
+                turn_id: "12345".to_string(),
+                call_id: "call-1".to_string(),
+                questions: vec![crate::HookUserInputQuestion {
+                    id: "confirm_path".to_string(),
+                    header: "Confirm".to_string(),
+                    question: "Proceed with the plan?".to_string(),
+                    is_secret: false,
+                }],
+            },
+        };
+
+        let serialized = legacy_notify_json(&hook_event, Path::new("/Users/example/project"))?;
+        let actual: Value = serde_json::from_str(&serialized)?;
+        assert_eq!(actual, expected_user_input_requested_notification_json());
 
         Ok(())
     }
